@@ -695,3 +695,104 @@ let%test "test_fun_20" = test_exec_fun
   }"
   ["0xA:0xD.g()"] 
   [("0xC","this.balance==100"); ("0xD","this.balance==0")]
+
+
+
+
+
+(***)
+
+let%test "test_issue3_assign" = test_exec_tx
+  "contract C { 
+      uint x; 
+      constructor() payable { x = 5; } 
+      function fun() public view { x = 10; }
+  }"
+  ["0xA:0xC.fun()"] 
+  [("x==5")]
+
+
+let%test "test_issue3_map" = test_exec_tx
+  "contract C { 
+      mapping(uint => uint) m; 
+      constructor() payable { m[1] = 50; } 
+      function fun() public view { m[1] = 99; }
+  }"
+  ["0xA:0xC.fun()"] 
+  [("m[1]==50")]
+
+
+let%test "test_issue3_send" = test_exec_tx
+  "contract C { 
+      constructor() payable { } 
+      function fun() public view { payable(msg.sender).transfer(10); }
+  }"
+  ["0xA:0xC.fun()"] 
+  [("this.balance==0")]
+
+
+
+let%test "test_issue3_internal_call" = test_exec_tx
+  "contract C { 
+      uint x; 
+      constructor() payable { x = 5; } 
+      function fun() public { x = 42; }
+      function fun_call() public view { this.fun(); }
+  }"
+  ["0xA:0xC.fun_call()"] 
+  [("x==5")]
+
+
+
+let%test "test_issue3_external_call" = test_exec_fun
+  "contract C { 
+      D d; 
+      constructor() payable { d = \"0xD\"; } 
+      function fun_call() public view { d.fun(); }
+  }"
+  "contract D { 
+      uint x;
+      constructor() payable { x = 5; } 
+      function fun() public { x = 42; }
+  }"
+  ["0xA:0xC.fun_call()"] 
+  [("0xD","x==5")]
+
+
+
+let%test "test_issue3_local" = test_exec_tx
+  "contract C { 
+      uint x; 
+      constructor() payable { x = 5; } 
+      function fun(uint y) public view { 
+          y = y + x;
+      }
+  }"
+  ["0xA:0xC.fun(10)"] 
+  [("x==5")]
+
+
+
+  let%test "test_issue3_local2" = test_exec_tx
+  "contract C { 
+      uint x; 
+      uint z;
+      constructor() payable { x = 5; z = 1; }
+      function fun(uint y) public view returns (uint) { 
+          y = y + x;
+          return y;
+      }
+      function fun2(uint y) public {
+        z = this.fun(y);
+      }
+  }"
+  ["0xA:0xC.fun2(10)"] 
+  [("x==5"); ("z==15")]
+
+
+(***)
+
+
+
+
+

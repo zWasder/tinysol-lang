@@ -250,10 +250,31 @@ let rec step_expr (e,st) = match e with
       { (st.accounts txto) with balance = (st.accounts txto).balance + txvalue } in 
     let fdecl = Option.get (find_fun_in_sysstate st txto f) in  
     (* setup new callstack frame *)
+
+    (***)
+    let current_is_view = match lookup_locals "%is_view%" (List.hd st.callstack).locals with
+      | Some (Bool true) -> true
+      | _ -> false
+    in
+    let mutability = match fdecl with
+      | Constr (_, _, m) 
+      | Proc (_, _, _, _, m, _) -> m
+    in
+    let is_view = (mutability = View) || current_is_view in
+    (***)
+
     let xl = get_var_decls_from_fun fdecl in
     let xl',vl' =
+
+      (***)
+      { ty=VarT(BoolBT); name="%is_view%"} ::
+      (***)
       { ty=VarT(AddrBT false); name="msg.sender"; } :: 
       { ty=VarT(UintBT); name="msg.value"; } :: xl,
+
+      (***)
+      Bool is_view ::
+      (***)
       Addr txfrom :: 
       Uint txvalue :: txargs
     in
@@ -311,20 +332,48 @@ and step_cmd = function
 
   | Returned v -> Returned v
 
-  | CmdSt(c,st) -> (match c with
+  | CmdSt(c,st) ->
+
+    (***)
+    let fr = List.hd (st.callstack) in
+    let check_is_view = match (lookup_locals "%is_view%" fr.locals) with
+      | Some (Bool true) -> true
+      | _ -> false
+    in
+    (***)
+    
+    (match c with
 
     | Skip -> St st
 
     | Assign(x,e) when is_val e -> 
+      (***)
+      let is_local = match (lookup_locals x fr.locals) with
+        | Some _ -> true
+        | _ -> false
+      in
+      if check_is_view && not is_local then
+        Reverted "View function: state variables modification not allowed"
+      else 
+      (***)
         St (update_var st x (exprval_of_expr_typechecked e (type_of_var x st)))
-        
+
+
     | Assign(x,e) -> 
       let (e', st') = step_expr (e, st) in CmdSt(Assign(x,e'), st')
 
     | Decons(_) -> failwith "TODO: multiple return values"
 
+    
     | MapW(x,ek,ev) when is_val ek && is_val ev ->
-        St (update_map st x (exprval_of_expr ek) (exprval_of_expr ev))
+      (***)
+      if check_is_view then
+        Reverted "View function: state variables modification not allowed"
+      else 
+      (***)
+      St (update_map st x (exprval_of_expr ek) (exprval_of_expr ev))
+
+    
     | MapW(x,ek,ev) when is_val ek -> 
       let (ev', st') = step_expr (ev, st) in 
       CmdSt(MapW(x,ek,ev'), st')
@@ -346,7 +395,13 @@ and step_cmd = function
         let (e', st') = step_expr (e, st) in
         CmdSt(If(e',c1,c2), st')
 
+
     | Send(ercv,eamt) when is_val ercv && is_val eamt -> 
+        (***) 
+        if check_is_view then
+          Reverted "View function: state variables modification not allowed"
+        else 
+        (***)
         let rcv = addr_of_expr ercv in 
         let amt = int_of_expr eamt in
         let from = (List.hd st.callstack).callee in 
@@ -359,6 +414,7 @@ and step_cmd = function
         else
           let rcv_state = { balance = amt; storage = botenv; code = None; } in
           St { st with accounts = st.accounts |> bind rcv rcv_state |> bind from from_state; active = rcv::st.active }
+
 
     | Send(ercv,eamt) when is_val ercv -> 
         let (eamt', st') = step_expr (eamt, st) in
@@ -418,10 +474,32 @@ and step_cmd = function
           { (st.accounts txto) with balance = (st.accounts txto).balance + txvalue } in 
         let fdecl = Option.get (find_fun_in_sysstate st txto f) in  
         (* setup new stack frame TODO *)
+
+        (***)
+        let current_is_view = match lookup_locals "%is_view%" (List.hd st.callstack).locals with
+          | Some (Bool true) -> true
+          | _ -> false
+        in
+        let mutability = match fdecl with
+          | Constr (_, _, m) 
+          | Proc (_, _, _, _, m, _) -> m
+        in
+        let is_view = (mutability = View) || current_is_view in
+        (***)
+
+
         let xl = get_var_decls_from_fun fdecl in
         let xl',vl' =
+
+          (***)
+          { ty=VarT(BoolBT); name="%is_view%"} ::
+          (***)
           { ty=VarT(AddrBT false); name="msg.sender"; } :: 
           { ty=VarT(UintBT); name="msg.value"; } :: xl,
+
+          (***)
+          Bool is_view ::
+          (***)
           Addr txfrom :: 
           Uint txvalue :: txargs
         in
@@ -568,27 +646,51 @@ let exec_tx (n_steps : int) (tx: transaction) (st : sysstate) : (sysstate,string
             callstack = st.callstack;
             blocknum = st.blocknum;
             active = tx.txto :: st.active }
+
       | Some (Proc(_,xl,c,_,m,_))
       | Some (Constr(xl,c,m)) ->
         if m<>Payable && tx.txvalue>0 then 
             Error "sending ETH to a non-payable function"
         else
+
+          (***)
+          let is_view = (m = View)
+          in
+          (***)
+
           let xl',vl' =
             if deploy then match tx.txargs with 
               _::al -> 
-              { ty=VarT(AddrBT false); name="msg.sender"; } ::
+
+              (***)
+              { ty=VarT(BoolBT); name="%is_view%"; } ::
+              (***)
+              { ty=VarT(AddrBT false); name="msg.sender"; } :: 
               { ty=VarT(UintBT); name="msg.value"; } :: xl
               ,
+
+              (***)
+              Bool is_view ::
+              (***)
               Addr tx.txsender :: 
               Uint tx.txvalue :: 
               al
               | _ -> assert(false) (* should never happen *)
             else
+              
+              (***)
+              { ty=VarT(BoolBT); name="%is_view%"; } ::
+              (***)
               { ty=VarT(AddrBT false); name="msg.sender"; } :: 
               { ty=VarT(UintBT); name="msg.value"; } :: xl,
+
+              (***)
+              Bool is_view ::
+              (***)
               Addr tx.txsender :: Uint tx.txvalue :: tx.txargs
           in
           let fr' = { callee = tx.txto; locals = [bind_fargs_aargs xl' vl'] } in
+
           let st' = { accounts = st.accounts 
                         |> bind tx.txsender sender_state
                         |> bind tx.txto to_state; 
@@ -626,3 +728,5 @@ let deploy_contract (tx : transaction) (src : string) (st : sysstate) : sysstate
   in match exec_tx 1000 tx' st with
     | Ok st' -> st'
     | Error _ -> st
+
+
