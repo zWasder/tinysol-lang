@@ -586,3 +586,51 @@ let%test "test_typecheck_enum_6" = test_typecheck
   "contract C { enum E1 {A1,B1} enum E2 {A2,B2} enum E1 {A1,B1} E1 s; function f() public { s = E1.A1; } }"
   false
 
+
+
+(* ---  ISSUE 8 --- *)
+
+let%test "test_typecheck_constant_1_ok" = test_typecheck 
+  "contract C {
+      uint constant a = 10;
+      int constant b = 20;
+  }"
+  true
+
+let%test "test_typecheck_constant_2_uninit" = test_typecheck 
+  "contract C {
+      int constant N;
+      constructor() { }
+  }"
+  false
+
+let%test "test_typecheck_constant_3_assign" = test_typecheck 
+  "contract C {
+      int constant N = 1;
+      constructor() { N = 2; }
+  }"
+  false
+
+let%test "test_typecheck_constant_4_mapping" = test_typecheck 
+  "contract C {
+      mapping (address k => uint v) constant myMap;
+  }"
+  false
+
+let%test "test_typecheck_constant_5_type_error" = test_typecheck 
+  "contract C {
+      uint constant number = true;
+  }"
+  false
+
+let%test "test_typecheck_constant_address" = test_typecheck
+"contract C {
+    address constant a = \"0x123\";
+    function f() public { 
+        address b;
+        b = a;    
+    }
+}"
+true
+
+

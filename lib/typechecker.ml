@@ -75,6 +75,12 @@ exception EnumOptionNotFound of ide * ide * ide
 exception EnumDupName of ide
 exception EnumDupOption of ide * ide
 exception MapInLocalDecl of ide * ide
+(***)
+exception UninitializedConstant of ide
+exception MappingConstant of ide
+exception ConstantTypeError of ide
+exception ConstantAssignmentError of ide
+(***)
 
 let logfun f s = "(" ^ f ^ ")\t" ^ s 
 
@@ -95,6 +101,12 @@ let string_of_typecheck_error = function
 | EnumDupName x -> "enum " ^ x ^ " is declared multiple times"
 | EnumDupOption (x,o) -> "enum option " ^ o ^ " is declared multiple times in enum " ^ x
 | MapInLocalDecl (f,x) -> logfun f "mapping " ^ x ^ " not admitted in local declaration" 
+(***)
+| UninitializedConstant x -> "Typechecker Error: The constant state variable '" ^ x ^ "' must be initialized."
+| MappingConstant x -> "Typechecker Error: The variable '" ^ x ^ "' is a mapping and cannot be declared as constant."
+| ConstantTypeError x -> "Typechecker Error: The constant '" ^ x ^ "' is initialized with an incorrect type."
+| ConstantAssignmentError x -> "Typechecker Error: Cannot assign a value to variable '" ^ x ^ "' because is declared as a constant."
+(***)
 | ex -> Printexc.to_string ex
 
 let exprtype_of_decltype = function
@@ -385,6 +397,11 @@ let rec typecheck_expr (f : ide) (edl : enum_decl list) vdl = function
 let is_immutable (x : ide) (vdl : var_decl list) = 
   List.fold_left (fun acc (vd : var_decl) -> acc || (vd.name=x && vd.mutability<>Mutable)) false vdl
 
+(***)
+let is_constant (x : ide) (vdl : var_decl list) = 
+  List.fold_left (fun acc (vd : var_decl) -> acc || (vd.name=x && vd.mutability=Constant)) false vdl
+(***)
+
 let typecheck_local_decls (f : ide) (vdl : local_var_decl list) = List.fold_left
   (fun acc vd -> match vd.ty with 
     | MapT(_) -> acc >> Error [MapInLocalDecl (f,vd.name)]
@@ -396,6 +413,12 @@ let rec typecheck_cmd (f : ide) (edl : enum_decl list) (vdl : all_var_decls) = f
     | Skip -> Ok ()
 
     | Assign(x,e) -> 
+        (***)
+        let state_vars = get_state_var_decls vdl in
+        if is_constant x state_vars then 
+            Error [ConstantAssignmentError x]
+        else
+        (***)
         (* the immutable modifier is not checked for the constructor *)
         if f <> "constructor" && is_immutable x (get_state_var_decls vdl) then Error [ImmutabilityError (f,x)]
         else (
@@ -494,6 +517,32 @@ let typecheck_enums (edl : enum_decl list) =
     (Ok ()) 
     edl
 
+
+(***)
+let check_constant_vars (vdl : var_decl list) =
+  List.fold_left (fun acc (vd : var_decl) ->
+    if vd.mutability = Constant then
+      match vd.ty with
+      | MapT (_, _) -> acc >> Error [MappingConstant vd.name]
+      | VarT base_type ->
+        (match vd.init_value with
+          | None -> acc >> Error [UninitializedConstant vd.name]
+          | Some evalue ->
+              let type_is_ok = match base_type, evalue with
+                | BoolBT, Bool _ -> true
+                | IntBT, Int _ -> true
+                | UintBT, Int n when n >= 0 -> true
+                | AddrBT _, Addr _ -> true
+                | _ -> false
+              in
+              if type_is_ok then acc else acc >> Error [ConstantTypeError vd.name]
+        )
+    else acc
+  ) (Ok ()) vdl
+(***)
+
+
+
 (* typecheck_contract : contract -> (unit,string) result 
     Perform several static checks on a given contract. The result is:
     - Ok () if all checks succeed 
@@ -507,6 +556,10 @@ let typecheck_contract (Contract(_,edl,vdl,fdl)) : typecheck_result =
   (* no multiply declared state variables *)
   no_dup_var_decls vdl
   >>
+  (***)
+  check_constant_vars vdl
+  >>
+  (***)
   (* no multiply declared functions *)
   no_dup_fun_decls fdl
   >>
