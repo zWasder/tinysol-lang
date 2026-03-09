@@ -795,4 +795,125 @@ let%test "test_issue3_local" = test_exec_tx
 
 
 
+(***)
+
+
+let%test "test_issue10_1" = test_exec_tx
+  "contract C {
+    int x = 1;
+    bool b = true;
+
+      function f() public view returns (int, bool) { 
+        return (x,b);
+      }
+      function g() public {
+        int y;
+        bool z;
+        (y,z) = this.f();
+        x += y; 
+        b = !z;
+      }
+  }"
+  ["0xA:0xC.g()"]
+  [("x==2"); ("b==false")]
+
+
+let%test "test_issue10_2" = test_exec_tx
+  "contract C {
+    int x = 1;
+    bool b = true;
+
+      function f() public view returns (int, bool) { 
+        return (x,b);
+      }
+      function g() public view {
+        int y;
+        bool z;
+        (y,z) = this.f();
+        x += y; 
+        b = !z;
+      }
+  }"
+  ["0xA:0xC.g()"]
+  [("x==1"); ("b==true")]
+
+
+let%test "test_issue10_3" = test_exec_tx
+  "contract C {
+    int x = 1;
+    bool b = true;
+
+      function f() public view returns (int, bool) { 
+        return (10,false);
+      }
+      function g() public view {
+        int y;
+        bool z;
+        (x,b) = this.f();
+      }
+  }"
+  ["0xA:0xC.g()"]
+  [("x==1"); ("b==true")]
+
+
+  let%test "test_issue10_destructuring" = test_exec_tx
+  "contract C {
+    uint x;
+    bool b;
+
+    function f() public view returns (uint, bool) { 
+      return (42, true);
+    }
+    function g() public {
+      uint y;
+      bool z;
+      (y,z) = this.f();
+      x = y; 
+      b = z;
+    }
+  }"
+  ["0xA:0xC.g()"]
+  [("x==42"); ("b==true")]
+
+
+  let%test "test_issue10_omitted_variables" = test_exec_tx
+  "contract C {
+    uint x;
+    uint y;
+
+    function f() public view returns (uint, uint, uint) { 
+      return (10, 20, 30);
+    }
+    function g() public {
+      uint a;
+      uint b;
+      (a, , b) = this.f();
+      x = a; 
+      y = b;
+    }
+  }"
+  ["0xA:0xC.g()"]
+  [("x==10"); ("y==30")]
+
+
+  let%test "test_issue10_view" = test_exec_tx
+  "contract C {
+    uint x = 1;
+    bool b = false;
+
+    function f() public view returns (uint, bool) { 
+      return (99, true);
+    }
+    function g() public view {
+      (x, b) = this.f();
+    }
+  }"
+  ["0xA:0xC.g()"]
+  [("x==1"); ("b==false")]
+
+
+
+(***)
+
+
 

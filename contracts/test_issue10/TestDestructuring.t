@@ -1,0 +1,29 @@
+//unit testing TestDestructuring.sol
+faucet 0xA 100
+deploy 0xA:0xC() "TestDestructuring" "contracts/test_issue10/TestDestructuring.sol"
+
+assert 0xC r0==0
+assert 0xC r1==0
+assert 0xC r2==false
+assert 0xC r3==0
+
+0xA:0xC.test0()
+
+assert 0xC r0==99
+assert 0xC r1==42
+assert 0xC r2
+assert 0xC r3==105
+
+0xA:0xC.test1()
+
+assert 0xC r0==99
+assert 0xC r1==42
+assert 0xC r2
+assert 0xC r3==105
+
+0xA:0xC.test2()
+
+assert 0xC r0==99
+assert 0xC r1==77
+assert 0xC r2
+assert 0xC r3==99

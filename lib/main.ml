@@ -362,8 +362,56 @@ and step_cmd = function
     | Assign(x,e) -> 
       let (e', st') = step_expr (e, st) in CmdSt(Assign(x,e'), st')
 
-    | Decons(_) -> failwith "TODO: multiple return values"
 
+    (***)
+
+    | Decons(ids, ExecFunCall c) -> (match step_cmd (CmdSt(c,st)) with
+      | St _ -> failwith "function terminated without return"
+      | Reverted s -> Reverted s
+      
+      | Returned vl -> 
+        let st_popped = pop_callstack st in
+        
+        let fr_caller = List.hd (st_popped.callstack) in
+        let caller_is_view = match (lookup_locals "%is_view%" fr_caller.locals) with
+          | Some (Bool true) -> true
+          | _ -> false
+        in
+        
+        let rec assign_vars names values current_st =
+          match names, values with
+          | [], [] -> St current_st
+          
+          | (Some x)::ns, v::vs -> 
+            let is_local = match (lookup_locals x fr_caller.locals) with
+              | Some _ -> true 
+              | _ -> false
+            in
+            if caller_is_view && not is_local then
+              Reverted "View function: state variables modification not allowed"
+            else
+              let e_v = expr_of_exprval v in
+              let v_casted = exprval_of_expr_typechecked e_v (type_of_var x current_st) in
+              let st_updated = update_var current_st x v_casted in
+              assign_vars ns vs st_updated
+                
+          | None::ns, _::vs -> 
+              assign_vars ns vs current_st
+              
+          | _ -> failwith "Decons: variable count does not match return value count"
+        in
+        assign_vars ids vl st_popped
+          
+      | CmdSt(c', st') -> CmdSt(Decons(ids, ExecFunCall c'), st')
+    )
+
+    | Decons(ids, e) -> 
+        let (e', st') = step_expr (e, st) in 
+        CmdSt(Decons(ids, e'), st')
+
+    (***)
+
+    
     
     | MapW(x,ek,ev) when is_val ek && is_val ev ->
       (***)
@@ -430,10 +478,12 @@ and step_cmd = function
     | Req(e) -> 
       let (e', st') = step_expr (e, st) in CmdSt(Req(e'), st')
 
-    | Return(el) when List.for_all is_val el -> Returned (List.map exprval_of_expr el) 
-    | Return(el) -> (match el with
-      | [e] -> let (e', st') = step_expr (e, st) in CmdSt(Return([e']), st')
-      | _ -> failwith "TODO: multiple return values not supported")
+    | Return(el) when List.for_all is_val el -> Returned (List.map exprval_of_expr el)
+    (***)
+    | Return(el) -> 
+      let (el', st') = step_expr_list (el, st) in 
+      CmdSt(Return(el'), st')
+    (***)
     
     | Block(vdl,c) ->
         let r' = List.fold_left (fun acc vd ->
